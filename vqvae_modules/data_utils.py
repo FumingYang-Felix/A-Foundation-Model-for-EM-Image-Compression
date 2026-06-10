@@ -1,5 +1,5 @@
 """
-Data loading and preprocessing utilities for EM images.
+Data loading and preprocessing utilities for high-resolution images.
 Handles large images by tiling into fixed-size patches.
 """
 

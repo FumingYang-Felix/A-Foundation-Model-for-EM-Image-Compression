@@ -233,7 +233,7 @@ def print_summary(results):
         print("\n🎉 All tests passed! Your VQ-VAE setup is ready.")
         print("\nNext steps:")
         print("  1. Read QUICK_START.md for usage examples")
-        print("  2. Prepare your EM image dataset")
+        print("  2. Prepare your image dataset")
         print("  3. Run: python train_mode1_toponly.py --help")
     else:
         print("\n⚠️  Some tests failed. Please check the errors above.")

@@ -1,5 +1,5 @@
 """
-VQ-VAE model architectures for EM image compression.
+VQ-VAE model architectures for high-resolution image compression.
 """
 
 import math

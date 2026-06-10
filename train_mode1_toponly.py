@@ -5,9 +5,9 @@ Mode 1: Top-Only VQ-VAE Training (1024× compression)
 Usage:
     python train_mode1_toponly.py --data_dir /path/to/images --output_dir ./runs/mode1
 
-This mode provides extreme compression (~1024×) suitable for whole-cell segmentation
-without requiring a trained prior. Membrane predictions remain stable, but may require
-3D consistency repair to fix occasional 2D breaks.
+This mode provides extreme compression (~1024×) that preserves global structure
+without requiring a trained prior. Reconstructions stay stable at extreme bitrate;
+fine detail is dropped and tile-boundary discontinuities can appear when stitching patches.
 """
 
 import os

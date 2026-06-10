@@ -1,4 +1,4 @@
-"""VQ-VAE modules for EM image compression."""
+"""VQ-VAE modules for high-resolution image compression."""
 
 from .layers import residual_block, residual_stack, VectorQuantizerEMA
 from .data_utils import load_and_preprocess_image, create_tiled_dataset

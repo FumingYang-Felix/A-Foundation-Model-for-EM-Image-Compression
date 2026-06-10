@@ -7,7 +7,7 @@ Usage:
 
 This mode provides moderate compression (~204×) with better texture preservation
 than Mode 1. Uses both top (coarse) and bottom (fine) quantizers to maintain
-overall cellular appearance.
+overall image appearance and texture.
 """
 
 import os

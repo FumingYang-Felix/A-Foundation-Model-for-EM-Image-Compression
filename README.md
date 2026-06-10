@@ -99,7 +99,7 @@ python3 train_mode2_twolevel.py --data_dir /path/to/images --output_dir ./runs/m
 
 # Mode 3 — transformer prior over Mode-2 latents (needs a trained Mode-2 checkpoint)
 python3 train_mode3_prior.py --data_dir /path/to/images --output_dir ./runs/mode3 \
-        --pretrained_vqvae ./runs/mode2/best_model
+        --pretrained_model ./runs/mode2/best_model
 
 # Evaluate a trained model (reconstruction metrics + samples)
 python3 evaluate_vqvae.py --model_dir ./runs/mode2 --data_dir /path/to/images

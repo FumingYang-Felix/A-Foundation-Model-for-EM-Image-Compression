@@ -7,7 +7,7 @@ import tensorflow as tf
 from .layers import residual_stack, VectorQuantizerEMA
 
 
-def build_encoder_to_top(img_size, top_grid, num_hiddens):
+def build_encoder_to_top(img_size, top_grid, num_hiddens, in_ch=1):
     """
     Build encoder that downsamples from img_size to top_grid.
     
@@ -15,18 +15,25 @@ def build_encoder_to_top(img_size, top_grid, num_hiddens):
         img_size: Input image size (e.g., 1024)
         top_grid: Output latent grid size (e.g., 32)
         num_hiddens: Number of hidden channels
-        
+        in_ch: Number of input channels. 1 for raw grayscale images; set to
+            num_hiddens_bottom when re-encoding bottom-level feature maps in
+            the two-level model.
+
     Returns:
         Keras Model for encoding
     """
     assert (img_size % top_grid) == 0, f"img_size {img_size} must be divisible by top_grid {top_grid}"
     n_downs = int(math.log2(img_size // top_grid))  # e.g., 1024->32 = 5 downsamples
-    
-    inputs = tf.keras.Input(shape=(img_size, img_size, 1))
+
+    inputs = tf.keras.Input(shape=(img_size, img_size, in_ch))
     x = inputs
-    
-    # Progressive downsampling with stride-2 convolutions
+
+    # Progressive downsampling with stride-2 convolutions. The final stride-2 conv
+    # must emit num_hiddens so the residual_stack below (whose skip path carries
+    # num_hiddens channels) adds tensors with matching shapes for any n_downs.
     chans = [64, 128, 128, 128, num_hiddens][:n_downs]
+    if chans:
+        chans[-1] = num_hiddens
     for c in chans:
         x = tf.keras.layers.Conv2D(c, 4, strides=2, padding='same')(x)
         x = tf.keras.layers.ReLU()(x)
@@ -37,7 +44,7 @@ def build_encoder_to_top(img_size, top_grid, num_hiddens):
     return tf.keras.Model(inputs, x, name=f'encoder_to_top_{top_grid}')
 
 
-def build_decoder_top_to_image(img_size, top_grid, in_ch):
+def build_decoder_top_to_image(img_size, top_grid, in_ch, out_ch=1):
     """
     Build decoder that upsamples from top_grid to img_size.
     
@@ -45,7 +52,10 @@ def build_decoder_top_to_image(img_size, top_grid, in_ch):
         img_size: Output image size (e.g., 1024)
         top_grid: Input latent grid size (e.g., 32)
         in_ch: Number of input channels
-        
+        out_ch: Number of output channels. 1 to render a grayscale image, or
+            num_hiddens_bottom to produce feature maps that condition the
+            bottom level in the two-level model.
+
     Returns:
         Keras Model for decoding
     """
@@ -62,8 +72,8 @@ def build_decoder_top_to_image(img_size, top_grid, in_ch):
         x = tf.keras.layers.ReLU()(x)
     
     # Final output layer
-    out = tf.keras.layers.Conv2D(1, 3, padding='same')(x)
-    
+    out = tf.keras.layers.Conv2D(out_ch, 3, padding='same')(x)
+
     return tf.keras.Model(inputs, out, name=f'decoder_top_{top_grid}_to_{img_size}')
 
 
@@ -190,8 +200,11 @@ class VQVAETwoLevel(tf.keras.Model):
             commitment_cost=commitment_cost_bottom, decay=0.99, epsilon=1e-5, name='vq_bottom'
         )
         
-        # Top encoder (from bottom features)
-        self.enc_top_from_bottom = build_encoder_to_top(bottom_grid, top_grid, num_hiddens_top)
+        # Top encoder (from bottom features). The bottom encoder emits
+        # num_hiddens_bottom channels, so the top encoder must accept them.
+        self.enc_top_from_bottom = build_encoder_to_top(
+            bottom_grid, top_grid, num_hiddens_top, in_ch=num_hiddens_bottom
+        )
         self.pre_vq_top = tf.keras.layers.Conv2D(embedding_dim_top, 1, name='pre_vq_top')
         self.vq_top = VectorQuantizerEMA(
             num_embeddings_top, embedding_dim_top,
@@ -199,8 +212,11 @@ class VQVAETwoLevel(tf.keras.Model):
         )
         self.post_vq_top = tf.keras.layers.Conv2D(num_hiddens_top, 1, name='post_vq_top')
         
-        # Top decoder (to bottom resolution)
-        self.dec_top_to_bottom = build_decoder_top_to_image(bottom_grid, top_grid, num_hiddens_top)
+        # Top decoder (to bottom resolution). Emit num_hiddens_bottom channels so
+        # the top latent conditions every bottom feature channel, not just one.
+        self.dec_top_to_bottom = build_decoder_top_to_image(
+            bottom_grid, top_grid, num_hiddens_top, out_ch=num_hiddens_bottom
+        )
         
         # Merge and decode
         self.post_vq_bottom = tf.keras.layers.Conv2D(num_hiddens_bottom, 1, name='post_vq_bottom')
@@ -222,8 +238,8 @@ class VQVAETwoLevel(tf.keras.Model):
         ztq = self.vq_top(zt, training=training)
         ztq = self.post_vq_top(ztq)  # [B, 32, 32, num_hiddens_top]
         
-        # Decode top to bottom resolution
-        ht_decoded = self.dec_top_to_bottom(ztq)  # [B, 64, 64, 1]
+        # Decode top to bottom resolution (conditions all bottom feature channels)
+        ht_decoded = self.dec_top_to_bottom(ztq)  # [B, 64, 64, num_hiddens_bottom]
         
         # Merge bottom quantized + top decoded
         zbq = self.post_vq_bottom(zbq)  # [B, 64, 64, num_hiddens_bottom]

@@ -65,8 +65,9 @@ def load_and_preprocess_image(path, target_channels=1):
     """
     Load and preprocess an image for VQ-VAE training.
     
-    Handles PNG, JPG, and TIFF formats. Converts to grayscale if needed,
-    normalizes to [-0.5, 0.5] range.
+    Handles PNG, JPG and TIFF, including high-bit-depth (16-bit) TIFFs common in
+    electron microscopy. Converts to grayscale if needed and normalizes by the
+    source dtype's range to [-0.5, 0.5] (no 8-bit truncation of 16-bit data).
     
     Args:
         path: Path to image file (can be tf.Tensor or string)
@@ -76,41 +77,33 @@ def load_and_preprocess_image(path, target_channels=1):
         Preprocessed image tensor [H, W, C] in range [-0.5, 0.5]
     """
     path = tf.convert_to_tensor(path)
-    ext = tf.strings.lower(tf.strings.regex_replace(path, r'^.*\.', '.'))
-    img_bin = tf.io.read_file(path)
 
-    def decode_png_jpg():
-        img = tf.io.decode_image(img_bin, channels=0, expand_animations=False)
-        return img
+    def decode_py(p):
+        """Decode any supported format to a single-channel float32 image in [0, 1].
 
-    def decode_tiff_py(p):
-        """Fallback for TIFF using PIL."""
-        arr = np.array(Image.open(p.decode('utf-8')))
-        if arr.ndim == 2:
-            arr = arr[..., None]
-        return arr
+        PIL handles 8-bit (L/P/RGB/RGBA/LA) and high-bit-depth (I/I;16/F) modes.
+        16-bit data is normalized by its full dynamic range instead of being cast
+        to uint8, which previously truncated the high byte and destroyed contrast.
+        """
+        im = Image.open(p.decode('utf-8'))
+        if im.mode in ('I', 'I;16', 'I;16B', 'I;16L', 'I;16N', 'F'):
+            # High-bit-depth: read raw values and scale, never truncate.
+            arr = np.asarray(im).astype(np.float32)
+            if arr.ndim == 3:
+                arr = arr[..., 0]
+            denom = 1.0 if im.mode == 'F' else 65535.0
+            arr = arr[..., None] / denom
+        else:
+            # 8-bit modes: PIL's 'L' conversion does a proper luminance mix and
+            # drops any alpha channel (fixes the RGBA -> rgb_to_grayscale crash).
+            arr = np.asarray(im.convert('L')).astype(np.float32)[..., None] / 255.0
+        return np.clip(arr, 0.0, 1.0).astype(np.float32)
 
-    # Check if TIFF
-    is_tiff = tf.reduce_any([tf.equal(ext, s) for s in [".tif", ".tiff"]])
-    img = tf.cond(
-        is_tiff,
-        lambda: tf.numpy_function(decode_tiff_py, [path], Tout=tf.uint8),
-        lambda: decode_png_jpg()
-    )
-    img.set_shape([None, None, None])  # H W C
-
-    # Convert to target channels
-    c = tf.shape(img)[-1]
-    if target_channels == 1:
-        img = tf.cond(
-            tf.equal(c, 1),
-            lambda: img,
-            lambda: tf.image.rgb_to_grayscale(img)
-        )
+    img = tf.numpy_function(decode_py, [path], Tout=tf.float32)
+    img.set_shape([None, None, 1 if target_channels == 1 else None])
     
-    # Normalize to [-0.5, 0.5]
-    img = tf.image.convert_image_dtype(img, tf.float32)  # [0, 1]
-    img = img - 0.5  # [-0.5, 0.5]
+    # decode_py already returns float32 in [0, 1]; recenter to [-0.5, 0.5].
+    img = img - 0.5
     return img
 
 
